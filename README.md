@@ -17,13 +17,12 @@
 
 First run postgres database, we used docker-compose:
 ```sh
+cd server
 docker-compose -f docker-compose-postgres-pgadmin4.yml up
 ```
 
-Then run 
+Then
 ```sh
-cd server
-
 yarn
 
 node index.js
