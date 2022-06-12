@@ -1,0 +1,6 @@
+POST http://localhost:3000/auth/requestChallange
+Content-Type: application/json
+
+{
+    "address": "0x69f28547F4f101a0F0559Cf01b94fF513F8681DA"
+}
