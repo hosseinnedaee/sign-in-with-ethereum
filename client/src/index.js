@@ -12,8 +12,7 @@ const contentSec = $('#content-section')
 const signInBtn = $('#sign-in-button');
 const connectToAccountBtn = $('#connect-to-account-button');
 const logoutBtn = $('#logout-button');
-const testBtn = $('#test-button');
-// const signInBtn = document.getElementById('sign-in-button');
+
 function setBtnState(btn, show, state) {
     const spinner = btn.children('svg')
     if (show) {
@@ -149,10 +148,6 @@ async function main() {
         }
         isAuthed = false;
         authChangedHandler()
-    })
-
-    testBtn.on('click', async function () {
-        await axios.get('/')
     })
 
     ethereum.on('accountsChanged', accountsChangedHandler)
