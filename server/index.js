@@ -76,7 +76,7 @@ app.get('/', checkAuth, (req, res) => {
     res.send(`hello ${req.address} !!`);
 })
 app.get('/auth/checkAuthenticated', checkAuth, (req, res) => {
-    return res.status(200).json({address: req.address});
+    return res.status(200).json({ address: req.address });
 })
 
 app.post('/auth/requestChallange', async (req, res) => {
@@ -158,8 +158,8 @@ app.post('/auth/login', async (req, res) => {
     });
 
     return res
-        .cookie("accessToken", accessToken, { httpOnly: true })
-        .cookie("refreshToken", refreshToken, { httpOnly: true })
+        .cookie("accessToken", accessToken, { httpOnly: false, secure: true, sameSite: 'none' })
+        .cookie("refreshToken", refreshToken, { httpOnly: false, secure: true, sameSite: 'none' })
         .json({
             address: address,
             accessToken,

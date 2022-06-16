@@ -10,6 +10,7 @@ const config = {
   output: {
     path: path.resolve(__dirname, "dist"),
   },
+  devtool: 'inline-source-map',
   devServer: {
     open: true,
     host: "localhost",
@@ -30,9 +31,13 @@ const config = {
         test: /\.(js|jsx)$/i,
         loader: "babel-loader",
       },
+      // {
+      //   test: /\.(eot|svg|ttf|woff|woff2|png|jpg|gif)$/i,
+      //   type: "asset",
+      // },
       {
-        test: /\.(eot|svg|ttf|woff|woff2|png|jpg|gif)$/i,
-        type: "asset",
+        test: /\.(png|svg|jpg|jpeg|gif)$/i,
+        type: 'asset/resource',
       },
 
       // Add your rules for custom modules here
@@ -42,7 +47,8 @@ const config = {
         test: /\.css$/i,
         include: path.resolve(__dirname, 'src'),
         use: ['style-loader', 'css-loader', 'postcss-loader']
-      }
+      },
+  
     ],
   },
 };
