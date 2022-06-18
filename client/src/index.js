@@ -15,6 +15,7 @@ const onboardingMetamaskBtn = onboardingMetamaskContainer.children('button');
 const loadingSpinner = $('#loading');
 const errorElm = $('#error-element')
 const selectedAccountAddressElm = $('#signed-in-address')
+const personaInfoBtn = $('#personal-info-button')
 
 const statuses = {
     ONBOARD_METAMASK: 'ONBOARD_METAMASK',
@@ -46,7 +47,7 @@ const PolygonNetworkParams = {
 }
 
 axios.defaults.baseURL = 'http://localhost:3000';
-axios.defaults.withCredentials = true
+axios.defaults.withCredentials = true // to session cookie works
 
 let provider;
 let ethereum;
@@ -148,7 +149,7 @@ function getCookie(name) {
     return cookies[name]
 }
 function render() {
-    const { isAuthed, accounts, errorMsg, status, selectedAddress } = states;
+    const { errorMsg, status, selectedAddress } = states;
     setBtnState(onboardingMetamaskBtn, false, 'normal')
     setBtnState(switchNetworkBtn, false, 'normal')
     setBtnState(connectToAccountBtn, false, 'normal')
@@ -217,10 +218,17 @@ async function manageStatus(params) {
 
     if (!accounts.length) {
         setState({ status: statuses.CONNECT_TO_WALLET })
+        unauthenticate()
         return;
     }
 
-    setState({ status: statuses.SIGN_IN })
+    if(!states.isAuthed) {
+        setState({ status: statuses.SIGN_IN })
+        unauthenticate();
+        return;
+    }
+    
+    authenticate(accounts[0])
 
 }
 
@@ -290,7 +298,7 @@ signInBtn.on('click', async function () {
 
     try {
         const res = await axios.post(
-            '/auth/login',
+            '/auth/sign_in',
             { address: selectedAddress, signature: signature },
         )
         const siggnedInAddress = res.data.address;
@@ -307,13 +315,23 @@ signInBtn.on('click', async function () {
 })
 logoutBtn.on('click', async function () {
     try {
-        axios.post('/auth/logout')
+        await axios.post('/auth/sign_out')
     } catch (err) {
         console.error(err);
     }
 
     unauthenticate();
     manageStatus()
+})
+personaInfoBtn.on('click', async function () {
+    try {
+        const res = await axios.get('/personal_information')
+        console.log('Personal Information: ', res.data.message)
+    } catch(e) {
+        console.error(e.message);
+        unauthenticate();
+        manageStatus()
+    }
 })
 onboardingMetamaskBtn.on('click', async function () {
     const onboarding = new MetaMaskOnboarding();
@@ -335,6 +353,16 @@ async function main() {
         console.log(err.message);
         setState({ status: statuses.ONBOARD_METAMASK })
     }
+
+    try {
+        const res = await axios.get('/personal_information')
+        const {address, message} = res.data;
+        setState({isAuthed: true})
+    } catch(e) {
+        console.error(e.message);
+        unauthenticate();
+    }
+
     setLoading(false)
 
     manageStatus()

@@ -7,6 +7,7 @@ import { ethers } from 'ethers'
 import * as db from './db/models/index.cjs'
 import jwt from 'jsonwebtoken'
 import cookieParser from 'cookie-parser';
+import { ErrorTypes, SiweMessage } from 'siwe'
 
 export const SecretOrPrivateKey = 'a-secret-private-key'
 export const SecretOrPublicKey = 'a-secret-public-key'
@@ -14,8 +15,12 @@ export const AccessTokenExpire = '30m' // 30 minutes
 export const RefreshTokenExpire = '1d' // one day
 // export const AccessTokenExpire = '10s' // 30 minutes
 // export const RefreshTokenExpire = '20s' // one day
+const CookieAccessTokenMaxAge = 1800000 // 30 minutes
+const CookieRefreshTokenMaxAge = 86400000 // 1 day
 
 const { Challange } = db.default
+
+const MaticChainId = '80001'
 
 const app = express()
 const port = 3000
@@ -41,6 +46,7 @@ function checkAuth(req, res, next) {
         userAddress = decoded.payload.id
         console.log('1', { decoded, userAddress });
     } catch (err) {
+        console.log('checkAuth err', err);
         res.clearCookie("accessToken");
 
         if (!refreshToken) {
@@ -58,25 +64,50 @@ function checkAuth(req, res, next) {
                 .send('please authenticate again - refresh token is invalid or expired')
         }
         console.log('2', { userAddress });
-        const accessToken = jwt.sign(
-            { id: userAddress, role: "normal" },
-            SecretOrPrivateKey,
-            { algorithm: 'HS256', expiresIn: AccessTokenExpire, noTimestamp: false, keyid: '1' }
-        )
-        res.cookie("accessToken", accessToken, { httpOnly: true })
-        // return res.status(401).send('please authenticate - accessToken is invalid or expired')
+        const { accessToken } = generateJWTTokens(userAddress, false)
+
+        res.cookie("accessToken", accessToken, { httpOnly: false, secure: false, sameSite: true, maxAge: CookieAccessTokenMaxAge })
     }
 
     req.address = userAddress
     req.isAuth = true
     next();
 }
+function createSiweMessage(address, statement, domain, origin) {
+    const siweMessage = new SiweMessage({
+        domain: domain,
+        address: address,
+        statement: statement,
+        uri: origin,
+        version: '1',
+        chainId: MaticChainId,
+    })
+    return siweMessage.prepareMessage();
+}
+function generateJWTTokens(address, withRefreshToken = false) {
+    let result = {}
+
+    result.accessToken = jwt.sign(
+        { id: address, role: "normal" },
+        SecretOrPrivateKey,
+        { algorithm: 'HS256', expiresIn: AccessTokenExpire, noTimestamp: false, keyid: '1' }
+    )
+
+    if (withRefreshToken) {
+        result.refreshToken = jwt.sign(
+            { id: address, role: "refresh" },
+            SecretOrPrivateKey,
+            { algorithm: 'HS256', expiresIn: RefreshTokenExpire, noTimestamp: false, keyid: '1' }
+        )
+    }
+
+    console.log('generated jwt tokens:', result);
+
+    return result
+}
 
 app.get('/', checkAuth, (req, res) => {
     res.send(`hello ${req.address} !!`);
-})
-app.get('/auth/checkAuthenticated', checkAuth, (req, res) => {
-    return res.status(200).json({ address: req.address });
 })
 
 app.post('/auth/requestChallange', async (req, res) => {
@@ -85,90 +116,97 @@ app.post('/auth/requestChallange', async (req, res) => {
     if (!ethers.utils.isAddress(address)) {
         return res.status(422).send('Address is not valid!');
     }
-
-    const nonce = uuidv4();
+    
     const issuedAt = new Date();
     let expiresIn = new Date()
     expiresIn.setSeconds(expiresIn.getSeconds() + 300) // 5 mins
 
-    const challangeCode = crypto.createHash('sha256').update(address + nonce + issuedAt.getTime()).digest('hex');
+    const challangeText = createSiweMessage(address, 'Sign in with ethereum to app', req.get('host'), req.get('origin'))
 
     let challange = await Challange.findOne({ where: { address: address } })
 
     if (!challange) {
         challange = await Challange.create({
-            address: address,
-            challangeCode: challangeCode,
-            issuedAt: issuedAt,
-            expiresIn: expiresIn
+            address,
+            challangeText,
+            issuedAt,
+            expiresIn
         })
     } else {
         challange = await challange.update({
-            challangeCode: challangeCode,
-            issuedAt: issuedAt,
-            expiresIn: expiresIn
+            challangeText,
+            issuedAt,
+            expiresIn
         })
     }
 
-    const challangeMessage = `I want to authenticate with lens and generate a JWT token at timestamp - ${issuedAt.getTime()}. Auth request id - ${challangeCode}`
-
-    return res.send(challangeMessage)
+    res.setHeader('Content-Type', 'text/plain')
+    return res.status(200).send(challangeText).end()
 })
 
-app.post('/auth/login', async (req, res) => {
-    const address = req.body.address;
-    const signature = req.body.signature;
-
-    const challange = await Challange.findOne({ where: { address: address } })
-    if (challange === null) {
-        return res.status(401).send('Challange does not exists!')
-    }
-    if ((new Date()).getTime() > challange.expiresIn.getTime()) {
-        await Challange.destroy({ where: { address: address } })
-        return res.status(401).send('Challange expired!')
-    }
-
-    const message = `I want to authenticate with lens and generate a JWT token at timestamp - ${challange.issuedAt.getTime()}. Auth request id - ${challange.challangeCode}`
-
-    let signerAddress;
+app.post('/auth/sign_in', async (req, res) => {
+    let challange;
+    let address;
     try {
-        signerAddress = ethers.utils.verifyMessage(message, signature)
-    } catch (err) {
-        return res.status(401).send('Signature is not valid!')
+        address = req.body.address;
+        const signature = req.body.signature;
+        if (!address || !signature) {
+            return res.status(422).json({ message: 'address and signature are required.' })
+        }
+
+        challange = await Challange.findOne({ where: { address } })
+        if (challange === null) {
+            return res.status(422).json({ message: 'Challange does not exists!' })
+        }
+
+        if ((new Date()).getTime() > challange.expiresIn.getTime()) {
+            await Challange.destroy({ where: { address } })
+            return res.status(440).json({ message: 'Challange expired!' })
+        }
+
+        const message = new SiweMessage(challange.challangeText)
+        await message.validate(signature)
+
+        await Challange.destroy({ where: { address: address } })
+
+        const { accessToken, refreshToken } = generateJWTTokens(address, true)
+
+        return res
+            .cookie("accessToken", accessToken, { httpOnly: false, secure: false, sameSite: true, maxAge: CookieAccessTokenMaxAge })
+            .cookie("refreshToken", refreshToken, { httpOnly: false, secure: false, sameSite: true, maxAge: CookieRefreshTokenMaxAge })
+            .json({
+                address,
+                accessToken,
+                refreshToken
+            })
+            .status(200)
+
+    } catch (e) {
+        console.error(e);
+        switch (e) {
+            case ErrorTypes.EXPIRED_MESSAGE:
+                challange && await Challange.destroy({ where: { address } })
+                return res.status(440).json({ mesage: e.message })
+            case ErrorTypes.INVALID_SIGNATURE:
+                challange && await Challange.destroy({ where: { address } })
+                return res.status(422).json({ mesage: e.message })
+            default:
+                return res.status(500).json({ message: e.message })
+        }
     }
-    if (signerAddress !== address) {
-        return res.status(401).send('Signature is not valid!')
-    }
-
-    await Challange.destroy({ where: { address: address } })
-
-    const accessToken = jwt.sign(
-        { id: address, role: "normal" },
-        SecretOrPrivateKey,
-        { algorithm: 'HS256', expiresIn: AccessTokenExpire, noTimestamp: false, keyid: '1' }
-    )
-    const refreshToken = jwt.sign(
-        { id: address, role: "refresh" },
-        SecretOrPrivateKey,
-        { algorithm: 'HS256', expiresIn: RefreshTokenExpire, noTimestamp: false, keyid: '1' }
-    )
-
-    console.log({
-        accessToken, refreshToken
-    });
-
-    return res
-        .cookie("accessToken", accessToken, { httpOnly: false, secure: true, sameSite: 'none' })
-        .cookie("refreshToken", refreshToken, { httpOnly: false, secure: true, sameSite: 'none' })
-        .json({
-            address: address,
-            accessToken,
-            refreshToken
-        })
-        .status(200)
 })
 
-app.post('/auth/logout', checkAuth, async (req, res) => {
+app.get('/personal_information', checkAuth, function (req, res) {
+    console.log('User is authenticated!');
+    res
+        .status(200)
+        .json({
+            message: `You are authenticated and your address is: ${req.address}`,
+            address: req.address
+        })
+})
+
+app.post('/auth/sign_out', checkAuth, async (req, res) => {
     return res
         .clearCookie('accessToken').clearCookie('refreshToken')
         .send('logged-out!')

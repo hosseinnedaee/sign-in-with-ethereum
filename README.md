@@ -6,7 +6,7 @@
 - Expressjs
 - Nodejs
 - Metamask
-- Sign In With ethereum SIWE
+- Sign In With ethereum SIWE (EIP-4361)
 - JWT Authentication
 
 

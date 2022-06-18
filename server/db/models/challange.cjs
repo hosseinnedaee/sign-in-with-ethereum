@@ -19,7 +19,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       unique: true
     },
-    challangeCode: {
+    challangeText: {
       type: DataTypes.STRING,
       allowNull: false,
     },

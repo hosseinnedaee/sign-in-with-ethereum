@@ -13,7 +13,7 @@ module.exports = {
         allowNull: false,
         unique: true
       },
-      challangeCode: {
+      challangeText: {
         type: Sequelize.STRING,
         allowNull: false,
       },
